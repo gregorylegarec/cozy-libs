@@ -8,6 +8,9 @@ import Field from 'cozy-ui/react/Field'
 
 import Manifest from '../Manifest'
 
+const legacyOptions = options =>
+  options.map(option => ({ ...option, label: option.name }))
+
 export class AccountField extends PureComponent {
   render() {
     const { name, t, type } = this.props
@@ -20,6 +23,14 @@ export class AccountField extends PureComponent {
       size: 'medium'
     }
     switch (type) {
+      case 'dropdown':
+        return (
+          <Field
+            {...fieldProps}
+            type="dropdown"
+            options={legacyOptions(fieldProps.options)}
+          />
+        )
       case 'password':
         return <Field {...fieldProps} />
       default:
