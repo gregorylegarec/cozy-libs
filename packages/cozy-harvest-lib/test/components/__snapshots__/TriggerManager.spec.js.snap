@@ -1,0 +1,54 @@
+// Jest Snapshot v1, https://goo.gl/fbAQLP
+
+exports[`KonnectorManager should pass account auth values 1`] = `
+<Wrapper
+  account={
+    Object {
+      "auth": Object {
+        "passphrase": "bar",
+        "username": "foo",
+      },
+    }
+  }
+  initialValues={
+    Object {
+      "passphrase": "bar",
+      "username": "foo",
+    }
+  }
+  onSubmit={[Function]}
+  submitting={false}
+/>
+`;
+
+exports[`KonnectorManager should pass oauth values 1`] = `
+<Wrapper
+  account={
+    Object {
+      "oauth": Object {
+        "accessToken": "abcdef12345",
+      },
+    }
+  }
+  initialValues={
+    Object {
+      "accessToken": "abcdef12345",
+    }
+  }
+  onSubmit={[Function]}
+  submitting={false}
+/>
+`;
+
+exports[`KonnectorManager should render 1`] = `
+<Wrapper
+  onSubmit={[Function]}
+  submitting={false}
+/>
+`;
+
+exports[`KonnectorManager should render as expected after submit success 1`] = `
+<Wrapper
+  onDone={[Function]}
+/>
+`;
