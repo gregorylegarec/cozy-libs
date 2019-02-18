@@ -11,7 +11,8 @@ jest.mock('cozy-client', () => ({
     where: jest.fn()
   }),
   get: jest.fn(),
-  query: jest.fn()
+  query: jest.fn(),
+  save: jest.fn()
 }))
 
 const fixtures = {
@@ -44,12 +45,17 @@ const fixtures = {
 }
 
 import { accountsMutations } from 'connections/accounts'
-const { createAccount, createChildAccount } = accountsMutations(client)
+const { createAccount, createChildAccount, updateAccount } = accountsMutations(
+  client
+)
 
 describe('Account mutations', () => {
   beforeEach(() => {
     client.create.mockReset()
     client.create.mockResolvedValue({ data: fixtures.simpleAccount })
+
+    client.save.mockReset()
+    client.save.mockResolvedValue(fixtures.simpleAccount)
   })
 
   describe('createAccount', () => {
@@ -297,6 +303,14 @@ describe('Account mutations', () => {
           )
         ).rejects.toEqual(new Error('Mocked error'))
       })
+    })
+  })
+
+  describe('updateAccount', () => {
+    it('call CozyClient and returns account', async () => {
+      const account = await updateAccount(fixtures.simpleAccount)
+      expect(client.save).toHaveBeenCalledWith(fixtures.simpleAccount)
+      expect(account).toEqual(fixtures.simpleAccount)
     })
   })
 })

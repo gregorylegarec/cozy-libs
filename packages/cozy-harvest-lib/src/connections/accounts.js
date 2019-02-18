@@ -78,9 +78,15 @@ export const accountsMutations = client => {
     })
   }
 
+  const updateAccount = async account => {
+    const { data } = await client.save(account)
+    return data
+  }
+
   return {
     createAccount,
-    createChildAccount
+    createChildAccount,
+    updateAccount
   }
 }
 
