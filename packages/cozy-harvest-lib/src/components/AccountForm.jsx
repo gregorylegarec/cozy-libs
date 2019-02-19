@@ -31,7 +31,16 @@ const VALIDATION_ERROR_REQUIRED_FIELD = 'VALIDATION_ERROR_REQUIRED_FIELD'
 
 export class AccountField extends PureComponent {
   render() {
-    const { initialValue, label, name, required, role, t, type } = this.props
+    const {
+      disabled,
+      initialValue,
+      label,
+      name,
+      required,
+      role,
+      t,
+      type
+    } = this.props
 
     // Allow manifest to specify predefined label
     const localeKey = predefinedLabels.includes(label) ? label : name
@@ -41,7 +50,7 @@ export class AccountField extends PureComponent {
     const fieldProps = {
       ...this.props,
       className: 'u-m-0', // 0 margin
-      disabled: !isEditable,
+      disabled: disabled || !isEditable,
       fullwidth: true,
       label: t(`fields.${localeKey}.label`, { _: name }),
       placeholder: getFieldPlaceholder(
@@ -93,7 +102,7 @@ const parse = type => value => {
 
 export class AccountFields extends PureComponent {
   render() {
-    const { container, initialValues, manifestFields, t } = this.props
+    const { container, disabled, initialValues, manifestFields, t } = this.props
 
     // Ready to use named fields array
     const namedFields = Object.keys(manifestFields).map(fieldName => ({
@@ -114,6 +123,7 @@ export class AccountFields extends PureComponent {
                 {...field}
                 {...input}
                 container={container}
+                disabled={disabled}
                 initialValue={
                   initialValues[field.name] ||
                   initialValues[getEncryptedFieldName(field.name)]
@@ -129,6 +139,7 @@ export class AccountFields extends PureComponent {
 }
 
 AccountFields.propTypes = {
+  disabled: PropTypes.bool,
   fillEncrypted: PropTypes.bool,
   manifestFields: PropTypes.object.isRequired,
   t: PropTypes.func
@@ -152,7 +163,7 @@ export class AccountForm extends PureComponent {
   }
 
   render() {
-    const { fields, initialValues, oauth, t } = this.props
+    const { fields, initialValues, oauth, onSubmit, submitting, t } = this.props
 
     if (oauth) return <OAuthForm oauth={oauth} />
 
@@ -166,8 +177,7 @@ export class AccountForm extends PureComponent {
     return (
       <Form
         initialValues={initialAndDefaultValues}
-        // eslint-disable-next-line no-console
-        onSubmit={v => console.log(v)}
+        onSubmit={onSubmit}
         validate={this.validate(sanitizedFields)}
         render={({ values, valid }) => (
           <div
@@ -177,16 +187,22 @@ export class AccountForm extends PureComponent {
           >
             <AccountFields
               container={container}
+              disabled={submitting}
               initialValues={initialAndDefaultValues}
               manifestFields={sanitizedFields}
               t={t}
             />
             <Button
+              busy={submitting}
               className="u-mt-2 u-mb-1-half"
-              disabled={!valid}
+              disabled={submitting || !valid}
               extension="full"
               label={t('accountForm.submit.label')}
-              onclick={() => alert(JSON.stringify(values, 0, 2))}
+              onClick={() => {
+                // Reset form with new values to set back dirty to false
+                form.reset(values)
+                onSubmit(values)
+              }}
             />
           </div>
         )}
@@ -199,7 +215,8 @@ AccountForm.propTypes = {
   account: PropTypes.object,
   fields: PropTypes.object,
   oauth: PropTypes.object,
-  locales: PropTypes.object
+  locales: PropTypes.object,
+  submitting: PropTypes.bool
 }
 
 export default translate()(AccountForm)
