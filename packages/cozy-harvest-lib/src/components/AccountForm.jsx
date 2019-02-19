@@ -154,10 +154,15 @@ export class AccountForm extends PureComponent {
     }
   }
 
-  validate = fields => vals => {
+  validate = (fields, initialValues) => vals => {
     let errors = {}
     for (let name in fields)
-      if (fields[name].required && !vals[name])
+      if (
+        fields[name].required &&
+        !vals[name] &&
+        // Don't require value for empty encrypted fields with initial value
+        !initialValues[getEncryptedFieldName(name)]
+      )
         errors[name] = VALIDATION_ERROR_REQUIRED_FIELD
     return errors
   }
@@ -178,8 +183,8 @@ export class AccountForm extends PureComponent {
       <Form
         initialValues={initialAndDefaultValues}
         onSubmit={onSubmit}
-        validate={this.validate(sanitizedFields)}
-        render={({ values, valid }) => (
+        validate={this.validate(sanitizedFields, initialAndDefaultValues)}
+        render={({ dirty, form, values, valid }) => (
           <div
             ref={element => {
               container = element
@@ -195,7 +200,7 @@ export class AccountForm extends PureComponent {
             <Button
               busy={submitting}
               className="u-mt-2 u-mb-1-half"
-              disabled={submitting || !valid}
+              disabled={submitting || !valid || !dirty}
               extension="full"
               label={t('accountForm.submit.label')}
               onClick={() => {
