@@ -1,0 +1,47 @@
+// Jest Snapshot v1, https://goo.gl/fbAQLP
+
+exports[`TriggerSuccessMessage should disable button after click 1`] = `
+<div
+  className="u-ta-center"
+>
+  <img
+    src="file-mock"
+  />
+  <h2>
+    TriggerSuccessMessage.title
+  </h2>
+  <p
+    className="u-ta-left"
+  >
+    TriggerSuccessMessage.description
+  </p>
+  <DefaultButton
+    disabled={true}
+    label="TriggerSuccessMessage.button.label"
+    onClick={[Function]}
+  />
+</div>
+`;
+
+exports[`TriggerSuccessMessage should render 1`] = `
+<div
+  className="u-ta-center"
+>
+  <img
+    src="file-mock"
+  />
+  <h2>
+    TriggerSuccessMessage.title
+  </h2>
+  <p
+    className="u-ta-left"
+  >
+    TriggerSuccessMessage.description
+  </p>
+  <DefaultButton
+    disabled={false}
+    label="TriggerSuccessMessage.button.label"
+    onClick={[Function]}
+  />
+</div>
+`;
