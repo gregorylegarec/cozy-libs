@@ -2,41 +2,75 @@ import Field from 'cozy-ui/react/Field'
 import React, { PureComponent } from 'react'
 import PropTypes from 'react-proptypes'
 
-import { getFieldPlaceholder, sanitizeSelectProps } from 'helpers/fields'
 import { translate } from 'cozy-ui/react/I18n'
 
-const IDENTIFIER = 'identifier'
+import { getFieldPlaceholder, sanitizeSelectProps } from '../helpers/fields'
+import { legacyLabels, predefinedLabels, ROLE_IDENTIFIER } from '../../Manifest'
 
-const predefinedLabels = [
-  'answer',
-  'birthdate',
-  'code',
-  'date',
-  'email',
-  'firstname',
-  'lastname',
-  'login',
-  'password',
-  'phone'
-]
-
-// Out of scope labels already used, should be transferred directly in manifests
-// in the future.
-const legacyLabels = [
-  'branchName' // Used in banking konnectors
-]
-
+/**
+ * AccountField encapsulate an unique Cozy-UI Field component.
+ * It maps its own props to Cozy-UI Field ones, and deal with i18n and locale
+ * logic.
+ *
+ * AccountField's props should be coming from konnector manifest
+ * fields property. We expect this object to have been sanitized.
+ */
 export class AccountField extends PureComponent {
+  static propTypes = {
+    /**
+     * The element wrapping the <Field /> component.
+     * Passed to <SelectBox /> component.
+     */
+    container: PropTypes.node,
+    /**
+     * Indicates if the <Field /> should be rendered with an error style.
+     */
+    hasError: PropTypes.bool,
+    /**
+     * Initial value of the field
+     */
+    initialValue: PropTypes.oneOfType([PropTypes.string, PropTypes.number]),
+    /**
+     * Optionnal predefined label, used as locale key.
+     */
+    label: PropTypes.string,
+    /**
+     * field name as declared in manifest, used as locale key and as fallback for
+     * label
+     */
+    name: PropTypes.string.isRequired,
+    /**
+     * Indicates if the field is required. Non-required fields will be indicated
+     * as "optional"
+     */
+    required: PropTypes.bool,
+    /**
+     * Indicates fields role. Defined in manifest or during fields sanitization.
+     * Valid values are ['identifier', 'password'].
+     * The field having role identifier will be given focus.
+     */
+    role: PropTypes.string,
+    /**
+     * Field type, passed to <Field /> component. Except for "dropdown" which
+     * will be mapped to "select"
+     */
+    type: PropTypes.oneOf(['date', 'dropdown', 'email', 'password', 'text']),
+    /**
+     * Translation function
+     */
+    t: PropTypes.func
+  }
+
   constructor(props) {
     super(props)
-    // Ref to identifier input
+    // Ref to identifier input, needed to give focus to identifier
     this.inputRef = null
     this.setInputRef = this.setInputRef.bind(this)
   }
 
   componentDidMount() {
     const { role } = this.props
-    if (role === IDENTIFIER && this.inputRef) {
+    if (role === ROLE_IDENTIFIER && this.inputRef) {
       this.inputRef.focus()
     }
   }
@@ -64,8 +98,9 @@ export class AccountField extends PureComponent {
         ? label
         : name
 
-    const isEditable = !(role === IDENTIFIER && initialValue)
+    const isEditable = !(role === ROLE_IDENTIFIER && initialValue)
 
+    // Cozy-UI <Field /> props
     const fieldProps = {
       ...this.props,
       autoComplete: 'off',
@@ -84,10 +119,12 @@ export class AccountField extends PureComponent {
       side: required ? null : t('accountForm.fields.optional'),
       size: 'medium'
     }
+
     const passwordLabels = {
       hideLabel: t('accountForm.password.hide'),
       showLabel: t('accountForm.password.show')
     }
+
     switch (type) {
       case 'date':
         return (
@@ -115,16 +152,6 @@ export class AccountField extends PureComponent {
         return <Field {...fieldProps} type="text" />
     }
   }
-}
-
-AccountField.propTypes = {
-  hasError: PropTypes.bool,
-  initialValue: PropTypes.oneOfType([PropTypes.string, PropTypes.number]),
-  label: PropTypes.string,
-  name: PropTypes.string.isRequired,
-  role: PropTypes.string,
-  type: PropTypes.oneOf(['date', 'dropdown', 'email', 'password', 'text']),
-  t: PropTypes.func
 }
 
 export default translate()(AccountField)
