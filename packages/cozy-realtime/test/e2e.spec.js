@@ -300,10 +300,12 @@ describe('(cozy-realtime) API: ', () => {
 
       it('should send SUBSCRIBE message', async () => {
         const realtime = CozyRealtime.init(mockConfig)
-        realtime.subscribe(fooSelector, 'created', jest.fn())
 
         server.stepForward()
-        await getSocket()
+
+        realtime.subscribe(fooSelector, 'created', jest.fn())
+
+        await realtime._socketPromise
         server.stepForward()
 
         expect(
@@ -407,7 +409,7 @@ describe('(cozy-realtime) API: ', () => {
 
         const realtime = CozyRealtime.init(mockConfig)
         realtime.subscribe(fooSelector, 'created', fooCreateHandler)
-        realtime.unsubscribe(fooSelector)
+        realtime.unsubscribe(fooSelector, 'created', fooCreateHandler)
 
         server.sendDoc(fixtures.fooDoc, 'created')
 
@@ -419,7 +421,7 @@ describe('(cozy-realtime) API: ', () => {
 
         const realtime = CozyRealtime.init(mockConfig)
         realtime.subscribe(fooSelector, 'updated', fooUpdateHandler)
-        realtime.unsubscribe(fooSelector)
+        realtime.unsubscribe(fooSelector, 'updated', fooUpdateHandler)
 
         server.sendDoc(fixtures.fooDoc, 'updated')
 
@@ -435,7 +437,11 @@ describe('(cozy-realtime) API: ', () => {
           'updated',
           fooUpdateHandler
         )
-        realtime.unsubscribe({ ...fooSelector, id: fixtures.fooDoc.id })
+        realtime.unsubscribe(
+          { ...fooSelector, id: fixtures.fooDoc.id },
+          'updated',
+          fooUpdateHandler
+        )
 
         server.sendDoc(fixtures.fooDoc, 'updated')
 
@@ -447,7 +453,7 @@ describe('(cozy-realtime) API: ', () => {
 
         const realtime = CozyRealtime.init(mockConfig)
         realtime.subscribe(fooSelector, 'deleted', fooDeleteHandler)
-        realtime.unsubscribe(fooSelector)
+        realtime.unsubscribe(fooSelector, 'deleted', fooDeleteHandler)
 
         server.sendDoc(fixtures.fooDoc, 'deleted')
 
@@ -463,7 +469,11 @@ describe('(cozy-realtime) API: ', () => {
           'deleted',
           fooDeleteHandler
         )
-        realtime.unsubscribe({ ...fooSelector, id: fixtures.fooDoc.id })
+        realtime.unsubscribe(
+          { ...fooSelector, id: fixtures.fooDoc.id },
+          'deleted',
+          fooDeleteHandler
+        )
 
         server.sendDoc(fixtures.fooDoc, 'deleted')
 
