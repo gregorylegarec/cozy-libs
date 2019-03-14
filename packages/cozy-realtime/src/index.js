@@ -4,8 +4,8 @@ import { subscribe as subscribeLegacy } from './legacy'
 // interface, it's a global variable to avoid creating multiple at a time
 let cozySocket
 
-const NUM_RETRIES = 3
-const RETRY_BASE_DELAY = 1000
+// const NUM_RETRIES = 3
+// const RETRY_BASE_DELAY = 1000
 
 // stored listeners
 // stored as Map { [doctype]: Object { [event]: listeners } }
@@ -88,53 +88,51 @@ const configTypes = {
 
 const validateConfig = validate(configTypes)
 
-export async function createWebSocket(
-  config,
-  onmessage,
-  onclose,
-  numRetries,
-  retryDelay
-) {
-  const options = {
-    secure: config.url ? isSecureURL(config.url) : true,
-    ...config
-  }
-
-  const protocol = options.secure ? 'wss:' : 'ws:'
-  const domain = options.domain || new URL(options.url).host
-
-  if (!domain) {
-    throw new Error('Unable to detect domain')
-  }
-
-  const socket = new WebSocket(
-    `${protocol}//${domain}/realtime/`,
-    'io.cozy.websocket'
-  )
-
-  const windowUnloadHandler = () => socket.close()
-  window.addEventListener('beforeunload', windowUnloadHandler)
-
-  socket.onmessage = onmessage
-  socket.onclose = event => {
-    window.removeEventListener('beforeunload', windowUnloadHandler)
-    if (typeof onclose === 'function') onclose(event, numRetries, retryDelay)
-  }
-  socket.onerror = error => console.error(`WebSocket error: ${error.message}`)
-
-  return new Promise(resolve => {
-    socket.onopen = () => {
-      console.debug('onopen')
-      socket.send(
-        JSON.stringify({
-          method: 'AUTH',
-          payload: options.token
-        })
-      )
-      resolve(socket)
-    }
-  })
-}
+// async function createWebSocket(
+//   config,
+//   onmessage,
+//   onclose,
+//   numRetries,
+//   retryDelay
+// ) {
+//   const options = {
+//     secure: config.url ? isSecureURL(config.url) : true,
+//     ...config
+//   }
+//
+//   const protocol = options.secure ? 'wss:' : 'ws:'
+//   const domain = options.domain || new URL(options.url).host
+//
+//   if (!domain) {
+//     throw new Error('Unable to detect domain')
+//   }
+//
+//   const socket = new WebSocket(
+//     `${protocol}//${domain}/realtime/`,
+//     'io.cozy.websocket'
+//   )
+//
+//   const windowUnloadHandler = () => socket.close()
+//   window.addEventListener('beforeunload', windowUnloadHandler)
+//
+//   socket.onmessage = onmessage
+//   socket.onclose = event => {
+//     window.removeEventListener('beforeunload', windowUnloadHandler)
+//     if (typeof onclose === 'function') onclose(event, numRetries, retryDelay)
+//   }
+//
+//   return new Promise(resolve => {
+//     socket.onopen = () => {
+//       socket.send(
+//         JSON.stringify({
+//           method: 'AUTH',
+//           payload: options.token
+//         })
+//       )
+//       resolve(socket)
+//     }
+//   })
+// }
 
 const onSocketMessage = event => {
   const data = JSON.parse(event.data)
@@ -214,21 +212,15 @@ const onSocketClose = event => {
 }
 
 export class CozyRealtime {
-  constructor({ domain, secure, token, url }) {
+  constructor({ domain, secure = true, token, url }) {
     validateConfig({ domain, secure, token, url })
 
     this._domain = domain
-    this._secure = secure
+    this._secure = url ? isSecureURL(url) : secure
     this._token = token
     this._url = url
 
-    this._socketPromise = createWebSocket(
-      { domain, secure, token, url },
-      onSocketMessage,
-      onSocketClose,
-      NUM_RETRIES,
-      RETRY_BASE_DELAY
-    )
+    this._socketPromise = this._connect()
   }
 
   static init(options) {
@@ -251,7 +243,6 @@ export class CozyRealtime {
       ...listeners.get(listenerKey),
       [eventName]: eventListeners
     })
-    console.debug(listeners)
     const socket = await this._socketPromise
 
     try {
@@ -271,11 +262,9 @@ export class CozyRealtime {
 
   unsubscribe({ type, id }, eventName, handler) {
     const listenerKey = getListenerKey(type, id)
-    console.debug(listenerKey)
 
     if (listeners.has(listenerKey)) {
       const socketListeners = listeners.get(listenerKey)
-      console.debug(socketListeners)
       if (
         socketListeners[eventName] &&
         socketListeners[eventName].includes(handler)
@@ -286,11 +275,93 @@ export class CozyRealtime {
         })
       }
       if (!hasListeners(listeners.get(listenerKey))) {
-        console.debug('delete', listenerKey)
         listeners.delete(listenerKey)
       }
     }
     return this
+  }
+
+  /**
+   * Establish a realtime connection
+   * @return {Promise} Promise of the opened websocket
+   */
+  _connect() {
+    return new Promise(resolve => {
+      const protocol = this._secure ? 'wss:' : 'ws:'
+      const socket = new WebSocket(
+        `${protocol}//${this._domain}/realtime/`,
+        'io.cozy.websocket'
+      )
+
+      const windowUnloadHandler = () => socket.close()
+      window.addEventListener('beforeunload', windowUnloadHandler)
+
+      socket.onmessage = this._handleSocketMessage.bind(this)
+      socket.onclose = this._handleSocketClose.bind(this)
+      socket.onerror = this._handleSocketError.bind(this)
+      socket.onopen = () => {
+        this._handleSocketOpen(socket)
+        resolve(socket)
+      }
+    })
+  }
+
+  /**
+   * Handles a socket closing
+   * @param  {CloseEvent} event
+   */
+  _handleSocketClose(event) {
+    this._stopListenningUnload()
+    return onSocketClose(event)
+  }
+
+  /**
+   * Handle a socket error
+   * @param  {Error} error [description]
+   */
+  _handleSocketError(error) {
+    console.error(`WebSocket error: ${error.message}`)
+  }
+
+  /**
+   * Handle a socket opening, send the authentification message to the cozy
+   * stack
+   * @param  {WebSocket} socket]
+   */
+  _handleSocketOpen(socket) {
+    this._listenUnload(socket)
+
+    socket.send(
+      JSON.stringify({
+        method: 'AUTH',
+        payload: this._token
+      })
+    )
+  }
+
+  /**
+   * Handle a message from the cozy-stack
+   * @param  {MessageEvent} event
+   */
+  _handleSocketMessage(event) {
+    return onSocketMessage(event)
+  }
+
+  /**
+   * Listen to window beforeUnload event, and close the current socket when it
+   * occurs.
+   * @param  {WebSocket} socket Openend socket
+   */
+  _listenUnload(socket) {
+    this.windowUnloadHandler = () => socket.close()
+    window.addEventListener('beforeunload', this.windowUnloadHandler)
+  }
+
+  /**
+   * Stop listenning for beforeunload window event. Useful when a socket closes.
+   */
+  _stopListenningUnload() {
+    window.removeEventListener('beforeunload', this.windowUnloadHandler)
   }
 }
 
