@@ -264,6 +264,13 @@ export class CozyRealtime {
         payload: this._token
       })
     )
+
+    // Once the socket is open, we send subscribe message
+    // from current subscription.
+    // Useful it the socket opened after the first subscribe,
+    // or in case of a reconnection.
+    for (const selector in this._subscriptions.toSubscribeMessages())
+      this._sendSubscribeMessage(selector)
   }
 
   /**

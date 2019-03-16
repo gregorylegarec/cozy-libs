@@ -329,10 +329,9 @@ describe('(cozy-realtime) API: ', () => {
 
         server.stepForward()
 
-        realtime.subscribe(fooSelector, 'created', jest.fn())
-        realtime.subscribe(fooSelector, 'created', jest.fn())
+        await realtime.subscribe(fooSelector, 'created', jest.fn())
+        await realtime.subscribe(fooSelector, 'created', jest.fn())
 
-        await realtime._socketPromise
         server.stepForward()
 
         expect(
@@ -345,7 +344,7 @@ describe('(cozy-realtime) API: ', () => {
         ).toBe(1)
       })
 
-      it('should receive created document of given doctype', async () => {
+      it('should receive created document of given doctype', () => {
         const fooCreateHandler = jest.fn()
 
         const realtime = CozyRealtime.init(mockConfig)
@@ -353,7 +352,6 @@ describe('(cozy-realtime) API: ', () => {
         server.stepForward()
 
         realtime.subscribe(fooSelector, 'created', fooCreateHandler)
-        await realtime._socketPromise
 
         server.sendDoc(fixtures.fooDoc, 'created')
         server.sendDoc(fixtures.barDoc, 'created')
