@@ -151,6 +151,12 @@ export class CozyRealtime {
   subscriptions = new RealtimeSubscriptions()
 
   /**
+   * Log were subcribe messages sent are recored
+   * @type {Array}
+   */
+  _log = []
+
+  /**
    * Open a WebSocket
    * @constructor
    * @param {String}  domain        The cozy domain
@@ -247,6 +253,9 @@ export class CozyRealtime {
    * @param  {WebSocket} socket]
    */
   _handleSocketOpen(socket) {
+    // Reset record of sent subscribe messages
+    this._log = []
+
     this._listenUnload(socket)
 
     socket.send(
@@ -292,12 +301,17 @@ export class CozyRealtime {
       payload
     })
 
+    // Do not send the same message twice
+    if (this._log.includes(rawMessage)) return
+
     try {
       socket.send(rawMessage)
     } catch (error) {
       console.warn(`Cannot subscribe to doctype ${type}: ${error.message}`)
       throw error
     }
+
+    this._log.push(rawMessage)
   }
 
   /**

@@ -89,10 +89,12 @@ describe('(cozy-realtime) API: ', () => {
       server.stepForward()
 
       expect(
-        server.received({
-          method: 'AUTH',
-          payload: mockConfig.token
-        })
+        server.received(
+          JSON.stringify({
+            method: 'AUTH',
+            payload: mockConfig.token
+          })
+        )
       ).toBe(true)
     })
 
@@ -107,10 +109,12 @@ describe('(cozy-realtime) API: ', () => {
         jest.runAllTimers()
 
         expect(
-          server.received({
-            method: 'SUBSCRIBE',
-            payload: { type: 'io.cozy.foo' }
-          })
+          server.received(
+            JSON.stringify({
+              method: 'SUBSCRIBE',
+              payload: { type: 'io.cozy.foo' }
+            })
+          )
         ).toBe(true)
       })
 
@@ -291,10 +295,12 @@ describe('(cozy-realtime) API: ', () => {
         server.stepForward()
 
         expect(
-          server.received({
-            method: 'AUTH',
-            payload: mockConfig.token
-          })
+          server.received(
+            JSON.stringify({
+              method: 'AUTH',
+              payload: mockConfig.token
+            })
+          )
         ).toBe(true)
       })
 
@@ -309,11 +315,34 @@ describe('(cozy-realtime) API: ', () => {
         server.stepForward()
 
         expect(
-          server.received({
-            method: 'SUBSCRIBE',
-            payload: { type: 'io.cozy.foo' }
-          })
+          server.received(
+            JSON.stringify({
+              method: 'SUBSCRIBE',
+              payload: { type: 'io.cozy.foo' }
+            })
+          )
         ).toBe(true)
+      })
+
+      it('should no send same SUBSCRIBE message twice', async () => {
+        const realtime = CozyRealtime.init(mockConfig)
+
+        server.stepForward()
+
+        realtime.subscribe(fooSelector, 'created', jest.fn())
+        realtime.subscribe(fooSelector, 'created', jest.fn())
+
+        await realtime._socketPromise
+        server.stepForward()
+
+        expect(
+          server.receivedTimes(
+            JSON.stringify({
+              method: 'SUBSCRIBE',
+              payload: { type: 'io.cozy.foo' }
+            })
+          )
+        ).toBe(1)
       })
 
       it('should receive created document of given doctype', async () => {
