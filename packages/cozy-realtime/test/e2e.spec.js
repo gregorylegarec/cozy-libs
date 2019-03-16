@@ -320,7 +320,11 @@ describe('(cozy-realtime) API: ', () => {
         const fooCreateHandler = jest.fn()
 
         const realtime = CozyRealtime.init(mockConfig)
+
+        server.stepForward()
+
         realtime.subscribe(fooSelector, 'created', fooCreateHandler)
+        await realtime._socketPromise
 
         server.sendDoc(fixtures.fooDoc, 'created')
         server.sendDoc(fixtures.barDoc, 'created')
@@ -480,7 +484,7 @@ describe('(cozy-realtime) API: ', () => {
         expect(fooDeleteHandler).toHaveBeenCalledTimes(0)
       })
 
-      xit('should stop receiving document for only one handler', () => {
+      it('should stop receiving document for only one handler', () => {
         const fooCreateHandler = jest.fn()
         const anotherFooCreateHandler = jest.fn()
 

@@ -1,41 +1,12 @@
 /* global WebSocket */
+import pick from 'lodash/pick'
+import pickBy from 'lodash/pickBy'
+
 import { subscribe as subscribeLegacy } from './legacy'
-// cozySocket is a custom object wrapping logic to websocket and exposing a subscription
-// interface, it's a global variable to avoid creating multiple at a time
-let cozySocket
+import RealtimeSubscriptions from './RealtimeSubscriptions'
 
 // const NUM_RETRIES = 3
 // const RETRY_BASE_DELAY = 1000
-
-// stored listeners
-// stored as Map { [doctype]: Object { [event]: listeners } }
-let listeners = new Map()
-
-// getters
-export const getListeners = () => listeners
-export const getCozySocket = () => cozySocket
-
-// listener key computing, according to doctype only or with doc id
-const LISTENER_KEY_SEPARATOR = '/' // safe since we can't have a '/' in a doctype
-const getListenerKey = (doctype, docId) =>
-  docId ? [doctype, docId].join(LISTENER_KEY_SEPARATOR) : doctype
-
-// const getTypeAndIdFromListenerKey = listenerKey => {
-//   const splitResult = listenerKey.split(LISTENER_KEY_SEPARATOR)
-//   return {
-//     doctype: splitResult.shift(),
-//     // if there still are some lements, this is the doc id
-//     docId: splitResult.length ? splitResult.join(LISTENER_KEY_SEPARATOR) : null
-//   }
-// }
-
-// return true if the there is at least one event listener
-const hasListeners = socketListeners => {
-  for (let event of ['created', 'updated', 'deleted']) {
-    if (socketListeners[event] && socketListeners[event].length) return true
-  }
-  return false
-}
 
 function isSecureURL(url) {
   const httpsRegexp = new RegExp(`^(https:/{2})`)
@@ -134,41 +105,6 @@ const validateConfig = validate(configTypes)
 //   })
 // }
 
-const onSocketMessage = event => {
-  const data = JSON.parse(event.data)
-  const eventType = data.event.toLowerCase()
-  const payload = data.payload
-
-  if (eventType === 'error') {
-    const realtimeError = new Error(payload.title)
-    const errorFields = ['status', 'code', 'source']
-    errorFields.forEach(property => {
-      realtimeError[property] = payload[property]
-    })
-
-    throw realtimeError
-  }
-
-  // the payload should always have an id here
-  const listenerKey = getListenerKey(payload.type, payload.id)
-
-  // id listener call
-  if (listeners.has(listenerKey) && listeners.get(listenerKey)[eventType]) {
-    listeners.get(listenerKey)[eventType].forEach(listener => {
-      listener(payload.doc)
-    })
-  }
-
-  if (listenerKey === payload.type) return
-
-  // doctype listener call
-  if (listeners.has(payload.type) && listeners.get(payload.type)[eventType]) {
-    listeners.get(payload.type)[eventType].forEach(listener => {
-      listener(payload.doc)
-    })
-  }
-}
-
 const onSocketClose = event => {
   //}, numRetries, retryDelay) => {
   if (!event.wasClean) {
@@ -212,6 +148,18 @@ const onSocketClose = event => {
 }
 
 export class CozyRealtime {
+  subscriptions = new RealtimeSubscriptions()
+
+  /**
+   * Open a WebSocket
+   * @constructor
+   * @param {String}  domain        The cozy domain
+   * @param {Boolean} [secure=true] Indicates either the WebSocket should be
+   * secure or not
+   * @param {String}  token         The Application token
+   * @param {String}  url           URL of the cozy. Can be used in place of
+   * domain and secure parameters
+   */
   constructor({ domain, secure = true, token, url }) {
     validateConfig({ domain, secure, token, url })
 
@@ -221,64 +169,32 @@ export class CozyRealtime {
     this._url = url
 
     this._socketPromise = this._connect()
+    this._subscriptions = new RealtimeSubscriptions()
   }
 
+  /**
+   * Returns an instance of CozyRealtime. Can be used instead of
+   * `new CozyRealtime`.
+   * @static
+   * @param  {Object} options Object containing domain, secure, token and url
+   * parameters
+   * @return {CozyRealtime}         CozyRealtime instance
+   */
   static init(options) {
     return new CozyRealtime(options)
   }
 
-  async subscribe({ type, id }, eventName, handler) {
+  subscribe({ type, id }, eventName, handler) {
     if (typeof handler !== 'function')
       throw new Error('Realtime event handler must be a function')
 
-    const listenerKey = getListenerKey(type, id)
+    this._subscriptions.addHandler({ type, id }, eventName, handler)
 
-    if (!listeners.has(listenerKey)) {
-      listeners.set(listenerKey, {})
-    }
-
-    const eventListeners = listeners.get(listenerKey)[eventName] || []
-    eventListeners.push(handler)
-    listeners.set(listenerKey, {
-      ...listeners.get(listenerKey),
-      [eventName]: eventListeners
-    })
-    const socket = await this._socketPromise
-
-    try {
-      const payload = { type }
-      if (id) payload.id = id
-      socket.send(
-        JSON.stringify({
-          method: 'SUBSCRIBE',
-          payload
-        })
-      )
-    } catch (error) {
-      console.warn(`Cannot subscribe to doctype ${type}: ${error.message}`)
-      throw error
-    }
+    return this._sendSubscribeMessage({ type, id })
   }
 
   unsubscribe({ type, id }, eventName, handler) {
-    const listenerKey = getListenerKey(type, id)
-
-    if (listeners.has(listenerKey)) {
-      const socketListeners = listeners.get(listenerKey)
-      if (
-        socketListeners[eventName] &&
-        socketListeners[eventName].includes(handler)
-      ) {
-        listeners.set(listenerKey, {
-          ...socketListeners,
-          [eventName]: socketListeners[eventName].filter(l => l !== handler)
-        })
-      }
-      if (!hasListeners(listeners.get(listenerKey))) {
-        listeners.delete(listenerKey)
-      }
-    }
-    return this
+    this._subscriptions.removeHandler({ type, id }, eventName, handler)
   }
 
   /**
@@ -311,6 +227,8 @@ export class CozyRealtime {
    * @param  {CloseEvent} event
    */
   _handleSocketClose(event) {
+    // Set to null to know that it is not available anymore.
+    this._socketPromise = null
     this._stopListenningUnload()
     return onSocketClose(event)
   }
@@ -341,10 +259,18 @@ export class CozyRealtime {
 
   /**
    * Handle a message from the cozy-stack
-   * @param  {MessageEvent} event
+   * @param {MessageEvent} event
    */
   _handleSocketMessage(event) {
-    return onSocketMessage(event)
+    const data = JSON.parse(event.data)
+    const eventName = data.event.toLowerCase()
+    const payload = data.payload
+
+    this._subscriptions.handle(
+      pick(payload, ['type', 'id']),
+      eventName,
+      payload.doc
+    )
   }
 
   /**
@@ -354,14 +280,33 @@ export class CozyRealtime {
    */
   _listenUnload(socket) {
     this.windowUnloadHandler = () => socket.close()
-    window.addEventListener('beforeunload', this.windowUnloadHandler)
+    window && window.addEventListener('beforeunload', this.windowUnloadHandler)
+  }
+
+  async _sendSubscribeMessage({ type, id }) {
+    const socket = await this._socketPromise
+    const payload = pickBy({ type, id })
+
+    const rawMessage = JSON.stringify({
+      method: 'SUBSCRIBE',
+      payload
+    })
+
+    try {
+      socket.send(rawMessage)
+    } catch (error) {
+      console.warn(`Cannot subscribe to doctype ${type}: ${error.message}`)
+      throw error
+    }
   }
 
   /**
    * Stop listenning for beforeunload window event. Useful when a socket closes.
    */
   _stopListenningUnload() {
-    window.removeEventListener('beforeunload', this.windowUnloadHandler)
+    window &&
+      window.removeEventListener('beforeunload', this.windowUnloadHandler)
+    delete this.windowUnloadHandler
   }
 }
 
