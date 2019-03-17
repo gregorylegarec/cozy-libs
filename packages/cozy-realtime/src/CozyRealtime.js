@@ -56,7 +56,8 @@ export class CozyRealtime {
       url: [isRequiredIfNo(['domain']), isURL]
     }).validate({ domain, secure, token, url })
 
-    this._domain = domain
+    this._domain = domain || new URL(url).host
+
     this._secure = url ? isSecureURL(url) : secure
     this._token = token
     this._url = url
@@ -80,6 +81,17 @@ export class CozyRealtime {
     return new CozyRealtime(options)
   }
 
+  /**
+   * Remove the given handler from the list of handlers for given
+   * doctype/document and event.
+   *
+   * @param  {String}  type      Document doctype to subscribe to
+   * @param  {String}  id        Document id to subscribe to
+   * @param  {String}  eventName Event to subscribe to
+   * @param  {Function}  handler   Function to call when an event of the
+   * given type on the given doctype or document is received from stack.
+   * @return {Promise}           Promise that the message has been sent.
+   */
   subscribe({ type, id }, eventName, handler) {
     if (typeof handler !== 'function')
       throw new Error('Realtime event handler must be a function')
@@ -89,6 +101,15 @@ export class CozyRealtime {
     return this._sendSubscribeMessage({ type, id })
   }
 
+  /**
+   * Remove the given handler from the list of handlers for given
+   * doctype/document and event.
+   * @param  {String}  type      Document doctype to unsubscribe from
+   * @param  {String}  id        Document id to unsubscribe from
+   * @param  {String}  eventName Event to unsubscribe from
+   * @param  {Function}  handler   Function to call when an event of the
+   * given type on the given doctype or document is received from stack.
+   */
   unsubscribe({ type, id }, eventName, handler) {
     this._subscriptions.removeHandler({ type, id }, eventName, handler)
   }
@@ -98,16 +119,19 @@ export class CozyRealtime {
    * @return {Promise} Promise of the opened websocket
    */
   _connect() {
-    this._socketPromise = new Promise(resolve => {
+    this._socketPromise = new Promise((resolve, reject) => {
       const protocol = this._secure ? 'wss:' : 'ws:'
-      const socket = new WebSocket(
+      const socket = this._createWebSocket(
         `${protocol}//${this._domain}/realtime/`,
         'io.cozy.websocket'
       )
 
       socket.onmessage = this._handleSocketMessage.bind(this)
       socket.onclose = this._handleSocketClose.bind(this)
-      socket.onerror = this._handleSocketError.bind(this)
+      socket.onerror = error => {
+        this._handleError(error)
+        reject(error)
+      }
       socket.onopen = () => {
         this._handleSocketOpen(socket)
         resolve(socket)
@@ -115,6 +139,15 @@ export class CozyRealtime {
     })
 
     return this._socketPromise
+  }
+
+  /**
+   * Proxy for instanciating a new WebSocket
+   * @see https://developer.mozilla.org/en-US/docs/Web/API/WebSockets_API/Writing_WebSocket_client_applications#Creating_a_WebSocket_object
+   * @return {WebSocket}   The instanciated WebSocket
+   */
+  _createWebSocket(url, protocols) {
+    return new WebSocket(url, protocols)
   }
 
   /**
@@ -137,27 +170,13 @@ export class CozyRealtime {
     this._stopListenningUnload()
 
     if (!event.wasClean) {
-      if (this._retries >= MAX_RETRIES) {
-        if (typeof this._onDisconnect === 'function') {
-          return this._onDisconnect(event)
-        }
-      } else {
-        this._retry()
-      }
+      this._retry(event)
     }
   }
 
   /**
-   * Handle a socket error
-   * @param  {Error} error [description]
-   */
-  _handleSocketError(error) {
-    this._handleError(error)
-  }
-
-  /**
-   * Handle a socket opening, send the authentification message to the cozy
-   * stack
+   * Handle a socket opening, send the authentification message to cozy
+   * stack, and a subribe message for every subscriptions that have been made.
    * @param  {WebSocket} socket]
    */
   _handleSocketOpen(socket) {
@@ -179,14 +198,14 @@ export class CozyRealtime {
 
     // Once the socket is open, we send subscribe message
     // from current subscription.
-    // Useful if the socket opened after the first subscribe,
+    // Useful if the socket opened after the first subscribe() call,
     // or in case of a reconnection.
-    for (const selector in this._subscriptions.toSubscribeMessages())
+    for (const selector of this._subscriptions.toSubscribeMessages())
       this._sendSubscribeMessage(selector)
   }
 
   /**
-   * Handle a message from the cozy-stack
+   * Handle a message from stack
    * @param {MessageEvent} event
    */
   _handleSocketMessage(event) {
@@ -213,19 +232,37 @@ export class CozyRealtime {
    * @param  {WebSocket} socket Openend socket
    */
   _listenUnload(socket) {
-    this.windowUnloadHandler = () => socket.close()
-    window && window.addEventListener('beforeunload', this.windowUnloadHandler)
+    this._windowUnloadHandler = () => socket.close()
+    window && window.addEventListener('beforeunload', this._windowUnloadHandler)
   }
 
-  _retry() {
-    setTimeout(() => {
-      this._connect()
-    }, this._retryDelay)
+  /**
+   * Retry to connect after a CloseEvent
+   * @param  {CloseEvent} event The CloseEvent which cause the retry
+   */
+  _retry(event) {
+    if (this._retries >= MAX_RETRIES) {
+      if (typeof this._onDisconnect === 'function') {
+        return this._onDisconnect(event)
+      }
+    } else {
+      setTimeout(() => {
+        this._connect()
+      }, this._retryDelay)
 
-    this._retries++
-    this._retryDelay = this._retryDelay * 2
+      this._retries++
+      this._retryDelay = this._retryDelay * 2
+    }
   }
 
+  /**
+   * Send a SUBSCRIBE message to stack
+   * @See https://github.com/cozy/cozy-stack/blob/master/docs/realtime.md#subscribe
+   * @async
+   * @param  {String}  type Document doctype to subscribe to
+   * @param  {String}  id   Document id to subscribe to
+   * @return {Promise}      Promise of sent message (resolves with no value)
+   */
   async _sendSubscribeMessage({ type, id }) {
     const socket = await this._socketPromise
     const payload = pickBy({ type, id })
@@ -252,8 +289,8 @@ export class CozyRealtime {
    */
   _stopListenningUnload() {
     window &&
-      window.removeEventListener('beforeunload', this.windowUnloadHandler)
-    delete this.windowUnloadHandler
+      window.removeEventListener('beforeunload', this._windowUnloadHandler)
+    delete this._windowUnloadHandler
   }
 }
 
