@@ -32,7 +32,7 @@ describe('(cozy-realtime) API: ', () => {
     jest.resetModules()
 
     realtime = require('../src/legacy').default
-    CozyRealtime = require('../src/index').CozyRealtime
+    CozyRealtime = require('../src/CozyRealtime').CozyRealtime
     server = new ServerMock(REALTIME_URL)
   })
 

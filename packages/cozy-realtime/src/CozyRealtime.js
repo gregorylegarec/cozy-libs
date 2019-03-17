@@ -1,4 +1,5 @@
 /* global WebSocket */
+import extend from 'lodash/extend'
 import pick from 'lodash/pick'
 import pickBy from 'lodash/pickBy'
 
@@ -47,7 +48,7 @@ export class CozyRealtime {
    * @param {String}  url           URL of the cozy. Can be used in place of
    * domain and secure parameters
    */
-  constructor({ domain, secure = true, token, url }) {
+  constructor({ domain, secure = true, token, url, onError, onDisconnect }) {
     Validator.create({
       domain: [isRequiredIfNo(['url']), isString],
       secure: [isBoolean],
@@ -59,6 +60,9 @@ export class CozyRealtime {
     this._secure = url ? isSecureURL(url) : secure
     this._token = token
     this._url = url
+
+    this._onError = onError
+    this._onDisconnect = onDisconnect
 
     this._subscriptions = new RealtimeSubscriptions()
     this._connect()
@@ -94,7 +98,7 @@ export class CozyRealtime {
    * @return {Promise} Promise of the opened websocket
    */
   _connect() {
-    this._socketPromise = Promise(resolve => {
+    this._socketPromise = new Promise(resolve => {
       const protocol = this._secure ? 'wss:' : 'ws:'
       const socket = new WebSocket(
         `${protocol}//${this._domain}/realtime/`,
@@ -114,6 +118,16 @@ export class CozyRealtime {
   }
 
   /**
+   * Handles error
+   * @param {Error} error
+   */
+  _handleError(error) {
+    if (typeof this._onError === 'function') {
+      this._onError(error)
+    }
+  }
+
+  /**
    * Handles a socket closing
    * @param  {CloseEvent} event
    */
@@ -122,13 +136,14 @@ export class CozyRealtime {
     this._socketPromise = null
     this._stopListenningUnload()
 
-    if (!event.wasClean && this._retries < MAX_RETRIES) {
-      setTimeout(() => {
-        this._connect()
-      }, this._retryDelay)
-
-      this._retries++
-      this._retryDelay = this._retryDelay * 2
+    if (!event.wasClean) {
+      if (this._retries >= MAX_RETRIES) {
+        if (typeof this._onDisconnect === 'function') {
+          return this._onDisconnect(event)
+        }
+      } else {
+        this._retry()
+      }
     }
   }
 
@@ -137,7 +152,7 @@ export class CozyRealtime {
    * @param  {Error} error [description]
    */
   _handleSocketError(error) {
-    console.error(`WebSocket error: ${error.message}`)
+    this._handleError(error)
   }
 
   /**
@@ -164,7 +179,7 @@ export class CozyRealtime {
 
     // Once the socket is open, we send subscribe message
     // from current subscription.
-    // Useful it the socket opened after the first subscribe,
+    // Useful if the socket opened after the first subscribe,
     // or in case of a reconnection.
     for (const selector in this._subscriptions.toSubscribeMessages())
       this._sendSubscribeMessage(selector)
@@ -179,15 +194,11 @@ export class CozyRealtime {
     const eventName = data.event.toLowerCase()
     const payload = data.payload
 
-    // if (eventType === 'error') {
-    //   const realtimeError = new Error(payload.title)
-    //   pick()[('status', 'code', 'source')]
-    //   errorFields.forEach(property => {
-    //     realtimeError[property] = payload[property]
-    //   })
-    //
-    //   throw realtimeError
-    // }
+    if (eventName === 'error') {
+      const realtimeError = new Error(payload.title)
+      extend(realtimeError, pick(payload, ['code', 'source', 'status']))
+      return this._handleError(realtimeError)
+    }
 
     this._subscriptions.handle(
       pick(payload, ['type', 'id']),
@@ -206,6 +217,15 @@ export class CozyRealtime {
     window && window.addEventListener('beforeunload', this.windowUnloadHandler)
   }
 
+  _retry() {
+    setTimeout(() => {
+      this._connect()
+    }, this._retryDelay)
+
+    this._retries++
+    this._retryDelay = this._retryDelay * 2
+  }
+
   async _sendSubscribeMessage({ type, id }) {
     const socket = await this._socketPromise
     const payload = pickBy({ type, id })
@@ -221,8 +241,7 @@ export class CozyRealtime {
     try {
       socket.send(rawMessage)
     } catch (error) {
-      console.warn(`Cannot subscribe to doctype ${type}: ${error.message}`)
-      throw error
+      return this._handleError(error)
     }
 
     this._log.push(rawMessage)
