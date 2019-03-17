@@ -5,8 +5,8 @@ import pickBy from 'lodash/pickBy'
 import { subscribe as subscribeLegacy } from './legacy'
 import RealtimeSubscriptions from './RealtimeSubscriptions'
 
-// const NUM_RETRIES = 3
-// const RETRY_BASE_DELAY = 1000
+const MAX_RETRIES = 3
+const RETRY_BASE_DELAY = 1000
 
 function isSecureURL(url) {
   const httpsRegexp = new RegExp(`^(https:/{2})`)
@@ -59,102 +59,15 @@ const configTypes = {
 
 const validateConfig = validate(configTypes)
 
-// async function createWebSocket(
-//   config,
-//   onmessage,
-//   onclose,
-//   numRetries,
-//   retryDelay
-// ) {
-//   const options = {
-//     secure: config.url ? isSecureURL(config.url) : true,
-//     ...config
-//   }
-//
-//   const protocol = options.secure ? 'wss:' : 'ws:'
-//   const domain = options.domain || new URL(options.url).host
-//
-//   if (!domain) {
-//     throw new Error('Unable to detect domain')
-//   }
-//
-//   const socket = new WebSocket(
-//     `${protocol}//${domain}/realtime/`,
-//     'io.cozy.websocket'
-//   )
-//
-//   const windowUnloadHandler = () => socket.close()
-//   window.addEventListener('beforeunload', windowUnloadHandler)
-//
-//   socket.onmessage = onmessage
-//   socket.onclose = event => {
-//     window.removeEventListener('beforeunload', windowUnloadHandler)
-//     if (typeof onclose === 'function') onclose(event, numRetries, retryDelay)
-//   }
-//
-//   return new Promise(resolve => {
-//     socket.onopen = () => {
-//       socket.send(
-//         JSON.stringify({
-//           method: 'AUTH',
-//           payload: options.token
-//         })
-//       )
-//       resolve(socket)
-//     }
-//   })
-// }
-
-const onSocketClose = event => {
-  //}, numRetries, retryDelay) => {
-  if (!event.wasClean) {
-    console.warn(
-      `WebSocket closed unexpectedly with code ${event.code} and ${
-        event.reason ? `reason: '${event.reason}'` : 'no reason'
-      }.`
-    )
-
-    // if (numRetries) {
-    //   console.warn(`Reconnecting ... ${numRetries} tries left.`)
-    //   setTimeout(() => {
-    //     try {
-    //       createWebSocket(
-    //         config,
-    //         onSocketMessage,
-    //         onSocketClose,
-    //         --numRetries,
-    //         retryDelay + 1000
-    //       )
-    //       // retry
-    //       if (listeners.size) {
-    //         listeners.forEach((value, listenerKey) => {
-    //           const { doctype, docId } = getTypeAndIdFromListenerKey(
-    //             listenerKey
-    //           )
-    //         })
-    //       }
-    //     } catch (error) {
-    //       console.error(
-    //         `Unable to reconnect to realtime. Error: ${error.message}`
-    //       )
-    //     }
-    //   }, retryDelay)
-    // } else {
-    //   console.error(`0 tries left. Stop reconnecting realtime.`)
-    //   // remove cached socket and promise
-    //   if (cozySocket) cozySocket = null
-    // }
-  }
-}
-
 export class CozyRealtime {
-  subscriptions = new RealtimeSubscriptions()
-
   /**
    * Log were subcribe messages sent are recored
    * @type {Array}
    */
   _log = []
+
+  _retries = 0
+  _retryDelay = RETRY_BASE_DELAY
 
   /**
    * Open a WebSocket
@@ -174,8 +87,8 @@ export class CozyRealtime {
     this._token = token
     this._url = url
 
-    this._socketPromise = this._connect()
     this._subscriptions = new RealtimeSubscriptions()
+    this._connect()
   }
 
   /**
@@ -208,15 +121,12 @@ export class CozyRealtime {
    * @return {Promise} Promise of the opened websocket
    */
   _connect() {
-    return new Promise(resolve => {
+    this._socketPromise = Promise(resolve => {
       const protocol = this._secure ? 'wss:' : 'ws:'
       const socket = new WebSocket(
         `${protocol}//${this._domain}/realtime/`,
         'io.cozy.websocket'
       )
-
-      const windowUnloadHandler = () => socket.close()
-      window.addEventListener('beforeunload', windowUnloadHandler)
 
       socket.onmessage = this._handleSocketMessage.bind(this)
       socket.onclose = this._handleSocketClose.bind(this)
@@ -226,6 +136,8 @@ export class CozyRealtime {
         resolve(socket)
       }
     })
+
+    return this._socketPromise
   }
 
   /**
@@ -236,7 +148,15 @@ export class CozyRealtime {
     // Set to null to know that it is not available anymore.
     this._socketPromise = null
     this._stopListenningUnload()
-    return onSocketClose(event)
+
+    if (!event.wasClean && this._retries < MAX_RETRIES) {
+      setTimeout(() => {
+        this._connect()
+      }, this._retryDelay)
+
+      this._retries++
+      this._retryDelay = this._retryDelay * 2
+    }
   }
 
   /**
@@ -253,6 +173,10 @@ export class CozyRealtime {
    * @param  {WebSocket} socket]
    */
   _handleSocketOpen(socket) {
+    // Reset _retries
+    this._retries = 0
+    this._retryDelay = RETRY_BASE_DELAY
+
     // Reset record of sent subscribe messages
     this._log = []
 
